@@ -1,0 +1,80 @@
+name: Create Issues From Veracode Scan Results And Promote Sandbox
+
+on:
+  schedule:
+    - cron: '00 3 */2 * 2'  #scheduled to run every other week
+
+#!! IMPORTANT !!
+#The following environment variables are required
+#Also make sure to set these secrets in the repo with the API ID and Key of your Veracode API account.  Contact the ISRM AppSecTesting at appsec@thomsonreuters.com for a Veracode API account.
+  #VERACODE_API_KEY_ID
+  #VERACODE_API_KEY_SECRET
+  #$GITHUB_TOKEN
+  #JFROG_KEY
+
+env:
+  #From your Veracode application profile, the ID is the second numerical parameter in the URL
+      #example:https://analysiscenter.veracode.com/auth/index.jsp#HomeAppProfile:10430:521978:11488373:11462863:11478526:5413764::
+      #521978 is the APP ID
+  APP_ID: ""
+
+  #Name of your Veracode Application Profile
+  APP_NAME: ""
+
+  #From your Veracode application profile, the ID is the last numerical parameter in the URL
+      #example:https://analysiscenter.veracode.com/auth/index.jsp#SandboxView:10430:521978:2279830
+      #2279830 is the Sandbox ID
+  SANDBOX_ID: ""
+
+  API_ID: ${{secrets.VERACODE_API_ID}}
+  API_KEY: ${{secrets.VERACODE_API_SECRET}}
+  GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+  GH_REPO: ${{github.repository}}
+  GITHUB_WORKSPACE: ${{github.workspace}}
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up JDK 1.8
+        uses: actions/setup-java@v1
+        with:
+          java-version: 1.8
+
+      - name: Get the API wrapper manifest
+        uses: wei/curl@master
+        with:
+          args: -sS -o manifest.xml "https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/maven-metadata.xml"
+
+      - name: Get latest wrapper version from manifest file
+        run: |
+          ver=$(cat manifest.xml | grep latest | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+')
+          echo "WRAPPER_VER=$ver" >> $GITHUB_ENV
+      - name: Get the Java API wrapper
+        uses: wei/curl@master
+        with:
+          args: -sS -o VeracodeJavaAPI.jar "https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/${{env.WRAPPER_VER}}/vosp-api-wrappers-java-${{env.WRAPPER_VER}}.jar"
+
+      - name: Get Build ID From Latest Scan
+        run: |
+          java -jar VeracodeJavaAPI.jar -action getbuildinfo -vid ${{secrets.VERACODE_API_ID}} -vkey ${{secrets.VERACODE_API_SECRET}} -appid ${{env.APP_ID}} -sandboxid ${{env.SANDBOX_ID}} > buildinfo.xml
+      - name: Download Script From Artifactory, To Get Latest Results and Create Issues
+        run: |
+          curl -H "X-JFrog-Art-Api:${{secrets.JFROG_KEY}}" -O "https://tr1.jfrog.io/artifactory/generic-local/isrm-appsec/veracode-actions/create-issues/createIssuesFromScanResults.zip!/createIssuesFromScanResults.py"
+      - name: Set Up Required ENV Vars and Run createIssuesFromScanResults.py
+        run: |
+          export VERACODE_API_KEY_ID=${{env.API_ID}}
+          export VERACODE_API_KEY_SECRET=${{env.API_KEY}}
+          export GH_TOKEN=${{env.GH_TOKEN}}
+          export GH_REPO=${{env.GH_REPO}}
+          export GH_WORKSPACE=${{env.GITHUB_WORKSPACE}}
+          export APP_NAME=${{env.APP_NAME}}
+          pip install veracode-api-signing
+          pip install pandas
+          python createIssuesFromScanResults.py
+      - name: Promoting Last Sandbox Scan To Policy
+        run: |
+          export BUILD_ID=$(cat buildid.xml)
+          java -jar VeracodeJavaAPI.jar -action promotesandbox -vid ${{secrets.VERACODE_API_ID}} -vkey ${{secrets.VERACODE_API_SECRET}} -buildid $BUILD_ID
