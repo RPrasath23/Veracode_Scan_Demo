@@ -1,0 +1,75 @@
+name: Veracode_Sandbox_Scan
+
+on:
+  push:
+    branches:
+      - main
+
+
+#!! IMPORTANT !!
+#The following environment variables are required
+#Also make sure to set these secrets in the repo with the API ID and Key of your Veracode API account.  Contact the ISRM AppSecTesting at appsec@thomsonreuters.com for a Veracode API account.
+  #VERACODE_API_KEY_ID
+  #VERACODE_API_KEY_SECRET
+
+env:
+  #From your Veracode application profile, the ID is the second numerical parameter in the URL
+    #example:https://analysiscenter.veracode.com/auth/index.jsp#HomeAppProfile:10430:521978:11488373:11462863:11478526:5413764::
+    #521978 is the APP ID 
+  APP_ID: "69083"
+
+  #Exact name of your Veracode application profile
+  APP_NAME: "Bermuda Resource Monitor"
+
+  #From your Veracode application profile, the ID is the last numerical parameter in the URL
+    #example:https://analysiscenter.veracode.com/auth/index.jsp#SandboxView:10430:521978:2279830
+    #2279830 is the Sandbox ID
+  SANDBOX_ID: "3337879"
+
+  #Path to your compiled binaries on the runner.  Specific file, or the directory that contains all files you want to upload are acceptable.
+  UPLOAD_FILE_PATH: ${{github.workspace}}
+
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up JDK 1.8
+        uses: actions/setup-java@v1
+        with:
+          java-version: 1.8
+        #compile your binaries here and place in the path you set for UPLOAD_FILE_PATH.  IF the build has already taken place, just pull down the latest build artifact from your repository
+      - name: Step -3 Do the build
+        run: mvn -B package --file pom.xml
+        #run: ant -noinput -buildfile build.xml
+      - name: Get the API wrapper manifest
+        uses: wei/curl@master
+        with:
+          args: -sS -o manifest.xml "https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/maven-metadata.xml"
+
+      - name: Get latest wrapper version from manifest file
+        run: |
+          ver=$(cat manifest.xml | grep latest | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+')
+          echo "WRAPPER_VER=$ver" >> $GITHUB_ENV
+      - name: Get the Java API wrapper
+        uses: wei/curl@master
+        with:
+          args: -sS -o VeracodeJavaAPI.jar "https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/${{env.WRAPPER_VER}}/vosp-api-wrappers-java-${{env.WRAPPER_VER}}.jar"
+
+      - name: Get Latest Scan Info
+        run: |
+          java -jar VeracodeJavaAPI.jar -action getbuildinfo -vid ${{secrets.VERACODE_API_ID}} -vkey ${{secrets.VERACODE_API_SECRET}} -appid ${{env.APP_ID}} -sandboxid ${{env.SANDBOX_ID}} > buildinfo.xml
+      - name: Check For Currently Running Veracode Scan
+        run: |
+          if grep -q "Results Ready" buildinfo.xml;
+          then
+            echo "INFO: No Veracode scan currently in progress. Starting a new Upload and Scan."
+          else
+            echo "INFO: Veracode scan exists and is not completed, deleting and starting a new scan"
+            java -jar VeracodeJavaAPI.jar -action deletebuild -vid ${{secrets.VERACODE_API_ID}} -vkey ${{secrets.VERACODE_API_SECRET}} -appid ${{env.APP_ID}} -sandboxid ${{env.SANDBOX_ID}}
+          fi
+      - name: Start Static Sandbox Scan
+        run: |
+          java -jar VeracodeJavaAPI.jar -action uploadandscan -vid ${{secrets.VERACODE_API_ID}} -vkey ${{secrets.VERACODE_API_SECRET}} -appname "${{env.APP_NAME}}" -sandboxid ${{env.SANDBOX_ID}} -createprofile false -version "GitHub Actions job $GITHUB_RUN_NUMBER" -filepath ${{env.UPLOAD_FILE_PATH}}
