@@ -16,15 +16,15 @@ env:
   #From your Veracode application profile, the ID is the second numerical parameter in the URL
       #example:https://analysiscenter.veracode.com/auth/index.jsp#HomeAppProfile:10430:521978:11488373:11462863:11478526:5413764::
       #521978 is the APP ID
-  APP_ID: ""
+  APP_ID: "69083"
 
   #Name of your Veracode Application Profile
-  APP_NAME: ""
+  APP_NAME: "Bermuda Resource Monitor"
 
   #From your Veracode application profile, the ID is the last numerical parameter in the URL
       #example:https://analysiscenter.veracode.com/auth/index.jsp#SandboxView:10430:521978:2279830
       #2279830 is the Sandbox ID
-  SANDBOX_ID: ""
+  SANDBOX_ID: "3337879"
 
   API_ID: ${{secrets.VERACODE_API_ID}}
   API_KEY: ${{secrets.VERACODE_API_SECRET}}
